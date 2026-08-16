@@ -1,0 +1,32 @@
+{
+  "name": "espNow_SharedVar",
+  "version": "1.0.0",
+  "description": "Partage de variables entre ESP8266 et ESP32 via ESP-NOW : déclarez une variable avec un nom, elle est automatiquement synchronisée sur tous les nœuds (ESP8266 + ESP32, IDF 4.x / 5.x / 6.x). Multi-écrivain par broadcast, auto-découverte des nœuds, heartbeat online/offline, chiffrement PMK/LMK, vérification d'intégrité des structs.",
+  "keywords": [
+    "esp-now",
+    "espnow",
+    "shared-variable",
+    "variable partagee",
+    "broadcast",
+    "iot",
+    "wireless",
+    "esp8266",
+    "esp32"
+  ],
+  "license": "GPL-3.0-only",
+  "frameworks": "arduino",
+  "platforms": [
+    "espressif8266",
+    "espressif32"
+  ],
+  "authors": [
+    {
+      "name": "Olivier FOURNET",
+      "email": "olivier.fournet@free.fr"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fo170/espNow_SharedVar.git"
+  }
+}
