@@ -13,7 +13,7 @@
 //    - Verification d'integrite des structs par ID
 //
 //  Auteur  : Genere pour FOURNET Olivier (GPL-3.0)
-//  Version : 1.0.0
+//  Version : 1.0.1
 // ============================================================================
 
 #ifndef ESPNOW_SHARED_VARIABLE_H
@@ -224,6 +224,36 @@ public:
     esp_now_register_send_cb(_onSent_32);
 #endif
     return true;
+  }
+
+  // --------------------------------------------------------------------------
+  //  Ré-armement après un reset WiFi
+  //  Le manager WiFi (WiFi.mode(WIFI_OFF) → esp_wifi_stop/deinit) efface l'état
+  //  du stack ESP-NOW et le callback de réception enregistré par begin(). Cette
+  //  méthode ré-initialise ESP-NOW et ré-enregistre les callbacks SANS toucher
+  //  au WiFi (à appeler à chaque (re)connexion WiFi, dans le loop).
+  // --------------------------------------------------------------------------
+  void rearm() {
+#if defined(ESP8266)
+    esp_now_init();
+    if (_hasKey) {
+      esp_now_set_kok((u8*)_key, 16);
+    }
+    esp_now_set_self_role(ESVROLE);
+    esp_now_register_recv_cb(_onRecv_8266);
+    esp_now_register_send_cb(_onSent_8266);
+#elif defined(ESP32)
+    esp_now_init();
+    if (_hasKey) {
+      esp_now_set_pmk(_key);
+    }
+    #if ESP_IDF_VERSION_MAJOR >= 5
+      esp_now_register_recv_cb(_onRecv_idf5plus);
+    #else
+      esp_now_register_recv_cb(_onRecv_idf4);
+    #endif
+    esp_now_register_send_cb(_onSent_32);
+#endif
   }
 
   // --------------------------------------------------------------------------
@@ -807,6 +837,10 @@ void loop() {
   // --- Recepteur : traiter les paquets entrants ---
   esv.update();
   esv.heartbeat(5000);  // envoyer un heartbeat toutes les 5s
+
+  // v1.0.1 : re-arme ESP-NOW apres un eventuel reset WiFi (ex. WiFiManagerESP).
+  // A appeler a chaque (re)connexion WiFi (sans effet ici, pas de gestionnaire WiFi).
+  esv.rearm();
 
   // --- Afficher l'etat des peers ---
   Serial.printf("Peers en ligne : %d / %d\n", esv.getOnlinePeerCount(), esv.peerCount());

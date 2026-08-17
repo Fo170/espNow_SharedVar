@@ -51,5 +51,10 @@ void loop() {
                 esv.getOnlinePeerCount());
 
   esv.heartbeat(5000);
+
+  // v1.0.1 : re-arme ESP-NOW apres un eventuel reset WiFi (ex. WiFiManagerESP).
+  // A appeler a chaque (re)connexion WiFi (sans effet ici, pas de gestionnaire WiFi).
+  esv.rearm();
+
   delay(3000);
 }

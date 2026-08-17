@@ -46,6 +46,10 @@ void loop() {
   esv.update();
   esv.heartbeat(3000);
 
+  // v1.0.1 : re-arme ESP-NOW apres un eventuel reset WiFi (ex. WiFiManagerESP).
+  // A appeler a chaque (re)connexion WiFi (sans effet ici, pas de gestionnaire WiFi).
+  esv.rearm();
+
   // --- Afficher l'etat ---
   Serial.printf("[RX] temp=%.1f  count=%d  alert=%s  |  peers=%d/%d\n",
                 temperature, compteur, alerte ? "ON" : "off",

@@ -52,5 +52,9 @@ void loop() {
   esv.update();        // Traite les paquets entrants (bidirectionnel)
   esv.heartbeat(3000); // Ping toutes les 3s
 
+  // v1.0.1 : re-arme ESP-NOW apres un eventuel reset WiFi (ex. WiFiManagerESP).
+  // A appeler a chaque (re)connexion WiFi (sans effet ici, pas de gestionnaire WiFi).
+  esv.rearm();
+
   delay(2000);
 }

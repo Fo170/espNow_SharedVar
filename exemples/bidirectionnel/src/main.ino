@@ -71,6 +71,10 @@ void loop() {
   esv.update();
   esv.heartbeat(3000);
 
+  // v1.0.1 : re-arme ESP-NOW apres un eventuel reset WiFi (ex. WiFiManagerESP).
+  // A appeler a chaque (re)connexion WiFi (sans effet ici, pas de gestionnaire WiFi).
+  esv.rearm();
+
   // --- 3. Appliquer les commandes sur le hardware ---
   digitalWrite(PIN_LED_R, ledRouge ? HIGH : LOW);
   digitalWrite(PIN_LED_V, ledVerte ? HIGH : LOW);

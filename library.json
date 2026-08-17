@@ -1,6 +1,6 @@
 {
   "name": "espNow_SharedVar",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Partage de variables entre ESP8266 et ESP32 via ESP-NOW : déclarez une variable avec un nom, elle est automatiquement synchronisée sur tous les nœuds (ESP8266 + ESP32, IDF 4.x / 5.x / 6.x). Multi-écrivain par broadcast, auto-découverte des nœuds, heartbeat online/offline, chiffrement PMK/LMK, vérification d'intégrité des structs.",
   "keywords": [
     "esp-now",
