@@ -13,7 +13,7 @@
 //    - Verification d'integrite des structs par ID
 //
 //  Auteur  : Genere pour FOURNET Olivier (GPL-3.0)
-//  Version : 1.0.1
+//  Version : 1.0.4
 // ============================================================================
 
 #ifndef ESPNOW_SHARED_VARIABLE_H
@@ -254,16 +254,34 @@ public:
     #endif
     esp_now_register_send_cb(_onSent_32);
 #endif
+    // v1.0.3 : les peers connus doivent être ré-enregistrés au driver (rearm()
+    // vide la table du driver mais pas _peerInfo) pour que les envois unicast
+    // refonctionnent immédiatement.
+    rearmPeers();
+  }
+
+  // --------------------------------------------------------------------------
+  //  Ré-enregistre tous les peers connus au driver (v1.0.3)
+  //  Après un rearm() (esp_now_init() vide la table du driver), à appeler avec
+  //  rearm(). Chaque addPeer() ré-enregistre le peer (idempotent) sans perdre
+  //  son état online/lastSeen.
+  // --------------------------------------------------------------------------
+  void rearmPeers() {
+    for (uint8_t i = 0; i < _peerCount; i++) {
+      addPeer(_peerInfo[i].mac);
+    }
   }
 
   // --------------------------------------------------------------------------
   //  Gestion des peers
   // --------------------------------------------------------------------------
   bool addPeer(const uint8_t* mac, uint8_t channel = 0) {
-    if (_findPeerIndex(mac) >= 0) return true;  // deja connu
-    if (_peerCount >= ESV_MAX_PEERS) return false;
     if (channel == 0) channel = _channel;
 
+    // ⚠️ FIX (v1.0.2) : ré-enregistrer le peer au driver MÊME s'il est déjà connu.
+    // Après un rearm() (esp_now_init()), la table du driver est vidée mais _peerInfo
+    // la conserve : sans ce ré-enregistrement, tout envoi unicast vers ce peer échoue
+    // silencieusement. esp_now_add_peer est idempotent (OK si déjà présent).
 #if defined(ESP8266)
     if (esp_now_add_peer((u8*)mac, ESVROLE, channel, nullptr, 0) != 0) return false;
 #elif defined(ESP32)
@@ -276,6 +294,10 @@ public:
     }
     if (esp_now_add_peer(&peer) != ESP_OK) return false;
 #endif
+
+    int pidx = _findPeerIndex(mac);
+    if (pidx >= 0) return true;  // déjà connu → juste ré-enregistré au driver
+    if (_peerCount >= ESV_MAX_PEERS) return false;
 
     memcpy(_peerInfo[_peerCount].mac, mac, 6);
     _peerInfo[_peerCount].lastSeen = 0;
@@ -479,6 +501,17 @@ public:
 #endif
   }
 
+  // --------------------------------------------------------------------------
+  //  DIAG (v1.0.4) — compteurs de réception, exposés pour Sante_iOT
+  //  total = paquets reçus (ISR) | ctrl = contrôle traités | data = données validées
+  //  jete  = données rejetées (mismatch) | overflow = trames écrasées (file pleine)
+  // --------------------------------------------------------------------------
+  uint32_t rxTotal() const     { return _rxTotal; }
+  uint32_t rxCtrl()  const     { return _rxCtrl; }
+  uint32_t rxData()  const     { return _rxData; }
+  uint32_t rxDataDrop() const  { return _rxDataDrop; }
+  uint32_t rxOverflow() const  { return _rxOverflow; }
+
 private:
   // --------------------------------------------------------------------------
   //  Callbacks reception -- ESP8266
@@ -526,10 +559,12 @@ private:
   //  File de reception (ISR-safe)
   // --------------------------------------------------------------------------
   void _queuePacket(const uint8_t* mac, const uint8_t* data, uint8_t len) {
+    _rxTotal++;   // v1.0.4 : compteur de diagnostic (Sante_iOT)
     if (len > 250) len = 250;
     uint8_t next = (_rxHead + 1) % ESV_RX_QUEUE;
     if (next == _rxTail) {
       _rxTail = (_rxTail + 1) % ESV_RX_QUEUE;
+      _rxOverflow++;   // v1.0.4 : trame écrasée (file pleine)
     }
     RxPacket& pkt = _rxQueue[_rxHead];
     memcpy(pkt.mac, mac, 6);
@@ -548,6 +583,7 @@ private:
 
     // --- Paquet de controle ---
     if (type_id == TYPE_CTRL) {
+      _rxCtrl++;   // v1.0.4 : compteur de diagnostic
       uint8_t sub_type = data[idx++];
       switch (sub_type) {
         case SUB_HEARTBEAT:
@@ -566,15 +602,15 @@ private:
     // --- Paquet de donnees ---
     uint16_t struct_id = 0;
     if (type_id == TYPE_STRUCT) {
-      if (idx + 2 > len) return;
+      if (idx + 2 > len) { _rxDrop(__LINE__, len); return; }
       struct_id = (data[idx] << 8) | data[idx + 1];
       idx += 2;
     }
 
-    if (idx >= len) return;
+    if (idx >= len) { _rxDrop(__LINE__, len); return; }
     uint8_t name_len = data[idx++];
-    if (name_len > ESV_MAX_NAMELEN) return;
-    if (idx + name_len + 2 > len) return;
+    if (name_len > ESV_MAX_NAMELEN) { _rxDrop(__LINE__, len); return; }
+    if (idx + name_len + 2 > len) { _rxDrop(__LINE__, len); return; }
 
     char name[ESV_MAX_NAMELEN + 1];
     memcpy(name, &data[idx], name_len);
@@ -583,22 +619,37 @@ private:
 
     uint16_t data_len = data[idx] | (data[idx + 1] << 8);
     idx += 2;
-    if (idx + data_len > len) return;
+    if (idx + data_len > len) { _rxDrop(__LINE__, len); return; }
 
     int vidx = _findVarByName(name);
-    if (vidx < 0) return;
+    if (vidx < 0) { _rxDrop(__LINE__, len); return; }
     SharedVar& sv = _vars[vidx];
-    if (sv.size != data_len) return;
-    if (sv.type_id != type_id) return;
+    if (sv.size != data_len) { _rxDrop(__LINE__, len); return; }
+    if (sv.type_id != type_id) { _rxDrop(__LINE__, len); return; }
     if (type_id == TYPE_STRUCT && sv.struct_id != 0 && struct_id != 0 && sv.struct_id != struct_id) {
-      return;  // Mismatch de struct ID
+      _rxDrop(__LINE__, len); return;  // Mismatch de struct ID
     }
 
     memcpy(sv.ptr, &data[idx], data_len);
+    _rxData++;   // v1.0.4 : données validées
 
     if (_userCb) {
       _userCb(name, mac);
     }
+  }
+
+  // --------------------------------------------------------------------------
+  //  v1.0.4 — comptage des trames de données rejetées (diagnostic / Sante_iOT)
+  //  Le détail (raison + dump hex) n'est loggé que si ESV_DIAG_LOG est défini.
+  // --------------------------------------------------------------------------
+  void _rxDrop(uint16_t ligne, uint16_t len) {
+    _rxDataDrop++;
+#ifdef ESV_DIAG_LOG
+    Serial.print(F("[ESV] donnée rejetée (L"));
+    Serial.print(ligne);
+    Serial.print(F(") len="));
+    Serial.println(len);
+#endif
   }
 
   // --------------------------------------------------------------------------
@@ -690,14 +741,13 @@ private:
   }
 
   bool _sendVarToAll(const SharedVar& sv) {
-    if (_peerCount == 0) {
-      return _sendVar(sv, ESV_BROADCAST_MAC);
-    }
-    bool ok = true;
-    for (uint8_t i = 0; i < _peerCount; i++) {
-      if (!_sendVar(sv, _peerInfo[i].mac)) ok = false;
-    }
-    return ok;
+    // ⚠️ FIX (v1.0.2) : toujours diffuser en BROADCAST, jamais en unicast.
+    // L'unicast ESP8266 vers un peer présent dans _peerInfo mais NON ré-enregistré
+    // au driver après un rearm() (WiFi reset → esp_now_init() vide la table) échoue
+    // silencieusement (status=1) : les données étaient perdues alors que les
+    // heartbeats (broadcast) passaient. Le broadcast est plus robuste et conforme à
+    // l'architecture (chaque nœud diffuse son paquet, le récepteur filtre par ID).
+    return _sendVar(sv, ESV_BROADCAST_MAC);
   }
 
   bool _sendRaw(const uint8_t* mac, const uint8_t* data, uint8_t len) {
@@ -758,6 +808,13 @@ private:
   RxPacket    _rxQueue[ESV_RX_QUEUE];
   volatile uint8_t _rxHead;
   volatile uint8_t _rxTail;
+
+  // v1.0.4 — compteurs de réception (Sante_iOT / monitoring)
+  volatile uint32_t _rxTotal = 0;       // tous paquets reçus (ISR)
+  volatile uint32_t _rxCtrl = 0;        // paquets de contrôle traités
+  volatile uint32_t _rxData = 0;        // paquets de données validés
+  volatile uint32_t _rxDataDrop = 0;    // paquets de données rejetés
+  volatile uint32_t _rxOverflow = 0;    // trames écrasées (file pleine)
 
   void (*_userCb)(const char* name, const uint8_t* mac);
 

@@ -2,7 +2,15 @@
 
 Bibliothèque **header-only** pour PlatformIO permettant de partager des variables entre microcontrôleurs ESP8266 et ESP32 via le protocole **ESP-NOW**. Une seule API masque les différences de syntaxe entre plateformes (ESP8266 vs ESP32, IDF 4.x / 5.x / 6.x).
 
-> **Version : 1.0.1** (nouveauté v1.0.1 : `esv.rearm()` pour survivre aux reset WiFi, voir [Reset WiFi & `rearm()`](#reset-wifi--rearm-v101)).
+> **Version : 1.0.4**
+> - **v1.0.2** : `_sendVarToAll()` diffuse désormais **toujours en BROADCAST** (l'unicast ESP8266 vers
+>   un peer non ré-enregistré au driver après un `rearm()` échouait silencieusement → données perdues
+>   alors que les heartbeats passaient) ; `addPeer()` ré-enregistre les peers **déjà connus** au driver.
+> - **v1.0.3** : `rearm()` ré-enregistre automatiquement les peers connus (`rearmPeers()`) → les envois
+>   unicast refonctionnent immédiatement après un reset WiFi.
+> - **v1.0.4** : **compteurs de réception permanents** pour le monitoring (`Sante_iOT`) —
+>   `rxTotal()` / `rxCtrl()` / `rxData()` / `rxDataDrop()` / `rxOverflow()`. Le détail des rejets
+>   (raison + ligne) n'est loggé que si `ESV_DIAG_LOG` est défini.
 
 > **Dépôt GitHub :** `https://github.com/Fo170/espNow_SharedVar` (lib `espNow_SharedVar`, classe `EspNowSharedVariable`).
 
@@ -112,6 +120,8 @@ void loop() {
 | `bool setKey(const char* passphrase)` | Définit une clé de chiffrement (16 octets dérivés). **Avant** `begin()`. |
 | `bool setKey(const uint8_t* key16)` | Définit une clé de chiffrement brute (16 octets). |
 | `void rearm()` | **v1.0.1** — Ré-initialise ESP-NOW et ré-enregistre les callbacks après un reset WiFi. À appeler à chaque (re)connexion WiFi. |
+| `void rearmPeers()` | **v1.0.3** — Ré-enregistre tous les peers connus au driver (esp_now_init() vide la table). Appelé automatiquement par `rearm()`. |
+| `rxTotal()` / `rxCtrl()` / `rxData()` / `rxDataDrop()` / `rxOverflow()` | **v1.0.4** — Compteurs de réception (monitoring / `Sante_iOT`). |
 
 ### Peers
 
@@ -237,6 +247,31 @@ void loop() {
 
 > ⚠️ **Le même correctif doit être appliqué aux deux nœuds d'un réseau ESP-NOW**
 > (émetteur ET récepteur) : un reset WiFi sur l'un ou l'autre efface ses propres callbacks.
+
+### v1.0.2 : `_sendVarToAll()` toujours en broadcast
+
+À partir de la v1.0.2, les variables sont **toujours diffusées en broadcast**, plus jamais en
+unicast. En effet, après un `rearm()` (qui vide la table de peers du **driver** mais pas `_peerInfo`),
+un envoi unicast ESP8266 vers un peer non ré-enregistré échouait **silencieusement** (statut RF 1) :
+les **données** ne partaient jamais alors que les **heartbeats** (broadcast) passaient.
+
+### v1.0.3 : `rearmPeers()` — ré-enregistrement des peers après `rearm()`
+
+`rearm()` ré-enregistre désormais **automatiquement** tous les peers connus au driver via
+`rearmPeers()`. Si besoin, `rearmPeers()` reste appelable explicitement (ex. après un
+`esv.begin()` manuel) :
+
+```cpp
+void loop() {
+  wifiManager.update();
+  if (wifiManager.isConnected()) {
+    esv.rearm();        // v1.0.3 : ré-initialise ESP-NOW + ré-enregistre les peers
+    esv.rearmPeers();   // (redondant, rearm() le fait déjà — appelable si besoin)
+  }
+  esv.update();
+  esv.heartbeat(3000);
+}
+```
 
 > ℹ️ Les exemples fournis (`exemples/`) appellent `rearm()` dans leur `loop()` : sans
 > gestionnaire WiFi, la méthode est sans effet mais garantit que le code reste correct si un
