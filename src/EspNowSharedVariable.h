@@ -19,6 +19,9 @@
 #ifndef ESPNOW_SHARED_VARIABLE_H
 #define ESPNOW_SHARED_VARIABLE_H
 
+
+// Version de la librairie (source UNIQUE — agrégée par liste_lib.h)
+#define __ESPNOWSHAREDVARIABLE_H_VERSION__ "1.0.4"
 #include <Arduino.h>
 #include <string.h>
 #include <stdint.h>
